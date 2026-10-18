@@ -70,12 +70,18 @@ def _json_rpc_error(request_id: Any, code: int, message: str) -> dict[str, Any]:
     }
 
 
-def handle_mcp_request(body: dict) -> tuple[dict, int]:
+def handle_mcp_request(body: dict) -> tuple[dict | None, int]:
     request_id = body.get("id")
     method = body.get("method", "")
     params = body.get("params", {})
 
     logger.info("MCP request: method=%s id=%s", method, request_id)
+
+    if method == "notifications/initialized":
+        if body.get("jsonrpc") != "2.0" or "id" in body or not isinstance(params, dict):
+            return _json_rpc_error(request_id, -32600, "Invalid initialized notification"), 400
+        # Accepted HTTP notifications have no JSON-RPC response envelope.
+        return None, 202
 
     if method == "initialize":
         result = {

@@ -423,6 +423,59 @@ class TestDurableUnitTesting:
 class TestMcpServerExample:
     """Smoke tests for examples/ai-and-agents/mcp_server_example."""
 
+    def test_registered_handler_initialization_sequence(self) -> None:
+        module = _load_example_module("ai-and-agents/mcp_server_example")
+        handler = next(
+            function.get_user_function()
+            for function in module.app.get_functions()
+            if function.get_function_name() == "mcp"
+        )
+        messages: list[dict[str, object]] = [
+            {
+                "jsonrpc": "2.0",
+                "id": 0,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test-client", "version": "1.0"},
+                },
+            },
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": "list", "method": "tools/list"},
+            {
+                "jsonrpc": "2.0",
+                "id": "calculate",
+                "method": "tools/call",
+                "params": {"name": "calculate", "arguments": {"expression": "(2 + 3) * 4"}},
+            },
+        ]
+        results = []
+        for message in messages:
+            response = handler(
+                func.HttpRequest(
+                    method="POST",
+                    url="/api/mcp",
+                    body=json.dumps(message).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                    },
+                )
+            )
+            if message["method"] == "notifications/initialized":
+                assert response.status_code == 202
+                assert response.get_body() == b""
+            else:
+                assert response.status_code == 200
+                result = json.loads(response.get_body())
+                assert result["id"] == message["id"]
+                results.append(result["result"])
+
+        assert results[0]["protocolVersion"] == "2025-03-26"
+        assert {tool["name"] for tool in results[1]["tools"]} == {"get_weather", "calculate"}
+        assert results[2]["content"] == [{"type": "text", "text": "20"}]
+
     def test_handle_get_weather(self) -> None:
         _load_example_module("ai-and-agents/mcp_server_example")
         svc = _import_service("ai-and-agents/mcp_server_example", "app.services.mcp_service")
